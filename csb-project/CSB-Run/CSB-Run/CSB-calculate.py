@@ -5,6 +5,7 @@ from pathlib import Path
 import argparse
 import logging
 import sys
+from tracemalloc import start
 # CSB-Run utility functions
 import utils
 
@@ -32,20 +33,19 @@ def chunks(l, n):
         yield l[i:i + n]
 
 
-def CSB_calc(file_path,shape_path,prep_path,start_year,end_year):
+def CSB_calc(file_path,prep_path,area,start_year,end_year):
     t_init = time.perf_counter()
-    
-    # gdb_name = c_{000}_{start_year}-{end_year}_In.gdb
-    #gdb_name = shape_path.split('\\')[-1].split('.')[0]
-    
-    # layer_name = f'c{000}_0_In'
-    
-    # CombineAll_name = c_{000}_0_{start_year}-{end_year}.tif
-
-    # NCL_names = 
-    shapefile_name = shape_path.split('\\')[-1].split('.')[0]
-    
+    gbd_name = f'c{area}_{start_year}-{end_year}_In.gdb'
+    layer_name = f'c{area}_0_In'
+    feature_Vector_In = f"{prep_path}/Vector_In/{gbd_name}/{layer_name}"
+    combine_All_Name = f''
+    raster_Combine_All = f'{prep_path}/CombineAll/c{area}_0_{start_year}-{end_year}.tif'
+    if end_year>=ncl_start_year:
+        raster_NCLs = [f"{national_cdl_folder}/{y}/{y}_30m_ncl.tif" for y in range(ncl_start_year,end_year)] 
+    else: 
+        raster_NCLs=[]
     year_lst = [i for i in range(start_year,end_year+1)]
+    shapefile_name = shape_path.split('\\')[-1].split('.')[0] 
 
     #set up logger
     LOG_FORMAT = "%(levelname)s %(asctime)s - %(message)s"
@@ -65,11 +65,10 @@ def CSB_calc(file_path,shape_path,prep_path,start_year,end_year):
     convert_raster = False
     while convert_raster == False:
         try:
-            arcpy.conversion.PolygonToRaster(subregion + '_CNTY1', "OBJECTID",
-                                             file_path+f'\Raster_Out\{shapefile_name}.tif',
+            raster_Vector_In_file = file_path+f'\Raster_In\VIn{area}_{start_year}-{end_year}.tif'
+            arcpy.conversion.PolygonToRaster(feature_Vector_In, "OBJECTID",
+                                             raster_Vector_In_file,
                                              assignmentType, "NONE", cellsize)
-
-            tif_raster_file = file_path+f'\Raster_Out\{shapefile_name}.tif'
             convert_raster = True
 
         except Exception as e:
@@ -79,7 +78,6 @@ def CSB_calc(file_path,shape_path,prep_path,start_year,end_year):
             f.write(''.join(str(item) for item in error_msg))
             f.close()
            
-        
         except:
             error_msg = arcpy.GetMessage(0)
             logger.error(error_msg)
@@ -87,21 +85,30 @@ def CSB_calc(file_path,shape_path,prep_path,start_year,end_year):
             f.write(''.join(str(item) for item in error_msg))
             f.close()
            
-    
     t2 = time.perf_counter()
     
-    logger.info(f'{shapefile_name}: Convert to .tif takes {round((t2 - t1) / 60, 2)} minutes')
+    logger.info(f'c{area}: Convert to .tif takes {round((t2 - t1) / 60, 2)} minutes')
+    
+    
+    logger.info(f'{area}: Create NCL Sub-Rasters ')
+    t1 = time.perf_counter()
     # Calculate NCL value for each year which we have NCL data
-    if end_year>=ncl_start_year:
-        for y in range(ncl_start_year,end_year+1):
-
+    zonal_ncls = [arcpy.sa.ZonalStatistics(raster_Vector_In_file, "OBJECTID", ncl, "MEAN")
+                     for ncl in raster_NCLs]
+    t2 = time.perf_counter()
+    logger.info(f'c{area}: NCL Sub-rasters takes {round((t2 - t1) / 60, 2)} minutes')
+    
     # Combine with CombineAll
-
+    logger.info(f'{area}: Combine and Join rasters')
+    t1 = time.perf_counter()
+    raster_combined = arcpy.gp.Combine_sa([raster_Vector_In_file,raster_Combine_All]+zonal_ncls)
+    join_table  = arcpy.management.AddJoin(raster_combined, f'{combine_All_Name}.OBJECTID', raster_Combine_All, "OBJECTID")
+    # TODO Save join field. 
     
 
     # Do the neighbor analysis
-    import arcpy
-    from arcpy.sa import *
+    # import arcpy
+    # from arcpy.sa import *
 
     # Set environment settings
     arcpy.env.workspace = r"Path\to\your\workspace"
