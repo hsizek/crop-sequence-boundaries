@@ -1,0 +1,4 @@
+
+/csb-project/CSB-Data/*
+*.pyc
+*.ini

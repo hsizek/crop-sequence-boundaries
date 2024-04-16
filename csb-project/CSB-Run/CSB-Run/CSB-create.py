@@ -61,12 +61,17 @@ def CSB_process(start_year, end_year, area):
     year_file_lst = []
     for year in year_lst:
         filePath = f'{cfg["folders"]["split_rasters"]}/{year}/' 
-        file_obj = Path(filePath).rglob(f'{area}_{year}*.tif')
+        #TODO 
+        # file_obj = Path(filePath).rglob(f'{area}_{year}*.tif')
+        file_obj = Path(filePath).rglob(f"{year}_{area}.TIF")
         file_lst = [x.__str__() for x in file_obj]
         sort_file_lst = []
-        for i in range(len(file_lst)):
-            path = f'{filePath}/{area}_{year}_{i}.TIF'
-            sort_file_lst.append(path)
+        path = f'{filePath}/{year}_{area}.TIF'
+        sort_file_lst.append(path)
+        # for i in range(len(file_lst)):
+        #     #TODO#
+        #     path = f'{filePath}/{area}_{year}_{i}.TIF'
+        #     sort_file_lst.append(path)
         year_file_lst.append(sort_file_lst)
 
     createGDB = False
@@ -78,12 +83,12 @@ def CSB_process(start_year, end_year, area):
             arcpy.CreateFileGDB_management(out_folder_path= f'{creation_dir}/Vectors_LL',
                                             out_name=f"{area}_{str(start_year)}-{str(end_year)}.gdb",
                                             out_version="CURRENT")
-            arcpy.CreateFileGDB_management(out_folder_path= f'{creation_dir}/Vectors_Out',
-                                            out_name=f"{area}_{str(start_year)}-{str(end_year)}_OUT.gdb",
-                                            out_version="CURRENT")
-            arcpy.CreateFileGDB_management(out_folder_path= f'{creation_dir}/Vectors_temp',
-                                            out_name=f"{area}_{str(start_year)}-{str(end_year)}_temp.gdb",
-                                            out_version="CURRENT")
+            # arcpy.CreateFileGDB_management(out_folder_path= f'{creation_dir}/Vectors_Out',
+            #                                 out_name=f"{area}_{str(start_year)}-{str(end_year)}_OUT.gdb",
+            #                                 out_version="CURRENT")
+            # arcpy.CreateFileGDB_management(out_folder_path= f'{creation_dir}/Vectors_temp',
+            #                                 out_name=f"{area}_{str(start_year)}-{str(end_year)}_temp.gdb",
+            #                                 out_version="CURRENT")
             arcpy.CreateFileGDB_management(out_folder_path= f'{creation_dir}/Vectors_In/',
                                             out_name=f"{area}_{str(start_year)}-{str(end_year)}_In.gdb",
                                             out_version="CURRENT")
@@ -105,7 +110,7 @@ def CSB_process(start_year, end_year, area):
             sys.exit(0)    
  
     print(f"{area}: Start Combine")
-    logger.info(f"{area}: Start Combine")
+    logger.info(f"{area}: Start Combine {file_lst}")
     for i in range(len(file_lst)):
         lst = [j[i] for j in year_file_lst]
         input_path = ';'.join(lst)
@@ -151,7 +156,8 @@ def CSB_process(start_year, end_year, area):
 
         # generate experession string
         logger.info(f'{area}_{i}: Calculate Field')
-        calculate_field_lst = [r'!'+f'{area}_{j}_{i}'[0:10]+r'!' for j in year_lst]
+        # calculate_field_lst = [r'!'+f'{area}_{j}_{i}'[0:10]+r'!' for j in year_lst]
+        calculate_field_lst = [r'!'+f'{j}_{area}'[0:10]+r'!' for j in year_lst]
         cal_expression = f"CountFieldsGreaterThanZero([{','.join(calculate_field_lst)}])"
         code = "def CountFieldsGreaterThanZero(fieldList): \n  counter = 0 \n  for field in fieldList: \n    if field > 0: \n      counter += 1 \n  return counter"
         try:
@@ -190,9 +196,10 @@ def CSB_process(start_year, end_year, area):
         out_feature_LL = f'{creation_dir}/Vectors_LL/{area}_{start_year}-{end_year}.gdb/{area}_{i}_In'
         arcpy.RasterToPolygon_conversion(in_raster=setNull_path,
                                           out_polygon_features=out_feature_LL,
-                                          simplify="SIMPLIFY", raster_field="Value",
+                                          simplify="NO_SIMPLIFY", raster_field="Value",
                                           create_multipart_features="SINGLE_OUTER_PART", max_vertices_per_feature="")
-
+        logger.info(f"{arcpy.management.GetCount(out_feature_LL)} features present for {area}.")
+        print(f"{arcpy.management.GetCount(out_feature_LL)} features present for {area}.")
 
         
         logger.info(f"{area}_{i}: Projection")
@@ -201,54 +208,63 @@ def CSB_process(start_year, end_year, area):
                                   out_coor_system=coor_str,
                                   transform_method=[], in_coor_system="", preserve_shape="NO_PRESERVE_SHAPE",
                                   max_deviation="", vertical="NO_VERTICAL")
-
+        
+        logger.info(f"{area}_{i}: Neighbors")
+        out_table_nbr = f'{creation_dir}/Vectors_In/{area}_{start_year}-{end_year}_In.gdb/{area}_{i}_nbr'
+        # out_table_nbr_csv = f'{creation_dir}/Neighbors/{area}_{i}_{start_year}-{end_year}_nbr.csv'
+        arcpy.analysis.PolygonNeighbors(in_features=out_feature_In, out_table=out_table_nbr,both_sides="NO_BOTH_SIDES")
 
     t1 = time.perf_counter()
     print(f'Time to finish all the steps before Elimination for {area}: {round((t1 - t0) / 60, 2)} minutes')
     logger.info(f'Time to finish all the steps before Elimination for {area}: {round((t1 - t0) / 60, 2)} minutes')
-
-    logger.info(f"{area}: Elimination"); print(f"{area}: Elimination")
+    # logger.info(f"{area}: Elimination"); print(f"{area}: Elimination")
     
-    eliminate_success = False
-    while eliminate_success == False:
-        try:
-            with arcpy.EnvManager(scratchWorkspace=f'{creation_dir}/Vectors_temp/{area}_{start_year}-{end_year}_temp.gdb', 
-                                  workspace=f'{creation_dir}/Vectors_temp/{area}_{start_year}-{end_year}_temp.gdb'):
-                CSBElimination(Input_Layers= f'{creation_dir}/Vectors_In/{area}_{start_year}-{end_year}_In.gdb',
-                Workspace= f'{creation_dir}/Vectors_Out/{area}_{start_year}-{end_year}_OUT.gdb',
-                Scratch= f'{creation_dir}/Vectors_temp/{area}_{start_year}-{end_year}_temp.gdb')
-            eliminate_success = True
+    # eliminate_success = False
+    # while eliminate_success == False:
+    #     try:
+    #         with arcpy.EnvManager(scratchWorkspace=f'{creation_dir}/Vectors_temp/{area}_{start_year}-{end_year}_temp.gdb', 
+    #                               workspace=f'{creation_dir}/Vectors_temp/{area}_{start_year}-{end_year}_temp.gdb'):
+    #             CSBElimination(Input_Layers= f'{creation_dir}/Vectors_In/{area}_{start_year}-{end_year}_In.gdb',
+    #             Workspace= f'{creation_dir}/Vectors_Out/{area}_{start_year}-{end_year}_OUT.gdb',
+    #             Scratch= f'{creation_dir}/Vectors_temp/{area}_{start_year}-{end_year}_temp.gdb')
+    #         eliminate_success = True
         
-        except Exception as e:
-                error_msg = e.args
-                logger.error(error_msg); print(f'{area}: {error_msg}')
-                f = open(error_path, 'a')
-                f.write(''.join(str(item) for item in error_msg))
-                f.write(r'/n')
-                f.close()
-                RepairTopology(f'{creation_dir}/Vectors_In/{area}_{start_year}-{end_year}_In.gdb',
-                                f'{creation_dir}/Vectors_temp/{area}_{start_year}-{end_year}_temp.gdb',
-                                area, logger)
-        except:
-                error_msg = arcpy.GetMessage(0)
-                logger.error(error_msg)
-                f = open(error_path, 'a')
-                f.write(''.join(str(item) for item in error_msg))
-                f.write(r'/n')
-                f.close()
-                sys.exit(0)
+    #     except Exception as e:
+    #             error_msg = e.args
+    #             logger.error(error_msg); print(f'{area}: {error_msg}')
+    #             f = open(error_path, 'a')
+    #             f.write(''.join(str(item) for item in error_msg))
+    #             f.write(r'/n')
+    #             f.close()
+    #             RepairTopology(f'{creation_dir}/Vectors_In/{area}_{start_year}-{end_year}_In.gdb',
+    #                             f'{creation_dir}/Vectors_temp/{area}_{start_year}-{end_year}_temp.gdb',
+    #                             area, logger)
+    #     except:
+    #             error_msg = arcpy.GetMessage(0)
+    #             logger.error(error_msg)
+    #             f = open(error_path, 'a')
+    #             f.write(''.join(str(item) for item in error_msg))
+    #             f.write(r'/n')
+    #             f.close()
+    #             sys.exit(0)
     
 
-    t2 = time.perf_counter()
-    print(f'Time that Elimination takes for {area}: {round((t2 - t1) / 60, 2)} minutes')
-    logger.info(f'Time that Elimination takes for {area}: {round((t2 - t1) / 60, 2)} minutes')
+    # t2 = time.perf_counter()
+    # print(f'Time that Elimination takes for {area}: {round((t2 - t1) / 60, 2)} minutes')
+    # logger.info(f'Time that Elimination takes for {area}: {round((t2 - t1) / 60, 2)} minutes')
 
-    for i in range(len(file_lst)):
-        logger.info(f"{area}_{i}: Select analysis")
-        arcpy.Select_analysis(
-            in_features=f'{creation_dir}/Vectors_Out/{area}_{start_year}-{end_year}_OUT.gdb/Out_{area}_{i}_In',
-            out_feature_class=f'{creation_dir}/Vectors_Out/{area}_{i}_{start_year}_{end_year}_Out.shp',
-            where_clause="Shape_Area >10000")
+    # for i in range(len(file_lst)):
+    #     logger.info(f"{area}_{i}: Select analysis")
+    #     arcpy.Select_analysis(
+    #         in_features=f'{creation_dir}/Vectors_Out/{area}_{start_year}-{end_year}_OUT.gdb/Out_{area}_{i}_In',
+    #         out_feature_class=f'{creation_dir}/Vectors_Out/{area}_{i}_{start_year}_{end_year}_Out.shp',
+    #         where_clause="Shape_Area >10000"
+    #         )
+    #     # arcpy.Select_analysis(
+    #     #     in_features=f'{creation_dir}/Vectors_In/{area}_{start_year}-{end_year}_In.gdb/{area}_{i}_In',
+    #     #     out_feature_class=f'{creation_dir}/Vectors_Out/{area}_{i}_{start_year}_{end_year}_Out.shp',
+    #     #     # where_clause="Shape_Area >10000"
+    #     #     )
 
     t3 = time.perf_counter()
     print(f'Total time for {area}: {round((t3 - t0) / 60, 2)} minutes')
@@ -401,9 +417,15 @@ if __name__ == '__main__':
     split_rasters = f'{cfg["folders"]["split_rasters"]}'
     print(f'Split raster folder: {split_rasters}')
     # get list of area files 
-    file_obj = Path(f'{split_rasters}/{start_year}/').rglob(f'*.tif')
-    file_lst = [x.__str__().split(f'{start_year}')[1][1:-1] for x in file_obj]
-    print(len(file_lst))
+    #TODO#
+    file_obj = Path(f'{split_rasters}/{start_year}/').rglob(f'*.TIF')
+    file_lst = [x.parts[-1] for x in file_obj]
+    # Area_Year.TIF
+    # area_lst = [x.split('_')[:-2] for x in file_lst]
+    # Year_Area.TIF
+    area_lst = ["_".join(x.split('_')[1:]).split('.')[0] for x in file_lst]
+    # file_lst = [x.__str__().split(f'{start_year}')[1][1:-1] for x in file_obj]
+    print(area_lst)
     
     # delete old files from previous run if doing partial run
     if partial_area != 'None':
@@ -415,7 +437,7 @@ if __name__ == '__main__':
     
     # Kick off multiple instances of CSB_Process by area
     processes = []
-    for area in np.unique(file_lst):
+    for area in np.unique(area_lst):
         p = multiprocessing.Process(target=CSB_process, args=[start_year, end_year, area])
         processes.append(p)
     
