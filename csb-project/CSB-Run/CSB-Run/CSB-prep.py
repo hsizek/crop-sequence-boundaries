@@ -328,7 +328,7 @@ def CSB_prep(file_path,shape_path,prep_path,CSByear,start_year,end_year):
         while zonal == False:
             try:
                 ZonalStatisticsAsTable(in_zone_data=tif_raster_file, zone_field='Value',
-                                       in_value_raster=fr'{national_cdl_folder}\\{y}\\{y}_30m_cdls.tif',
+                                       in_value_raster=fr'{national_cdl_folder}\\{y}_30m_cdls\\{y}_30m_cdls.tif',
                                        out_table=Merge_gdb + "//" + f"Raster_Out_{y}_30m_cdls",
                                        ignore_nodata="NODATA", statistics_type="MAJORITY")
                 zonal = True

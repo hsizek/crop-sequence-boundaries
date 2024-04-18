@@ -65,7 +65,8 @@ def SetRunParams(config, args):
     scripts = {'create': 'CSB-create.py',
                 'prep': 'CSB-prep.py',
                 'distribute': 'CSB-distribute.py',
-                'create_partial': 'CSB-create_partial.py'}
+                'create_partial': 'CSB-create_partial.py',
+                'calc':'CSB-calc.py'}
     workflow = args[0]
     
     script = f'{os.getcwd()}/CSB-Run/CSB-Run/{scripts[workflow]}'
@@ -100,10 +101,10 @@ def SetRunParams(config, args):
 # function that builds folders for a CSB run
 def BuildFolders(creation_dir, workflow):
     creation_folders = ['Combine','CombineAll','Merge','Vectors_In','Vectors_LL',
-                        'Vectors_Out','Vectors_temp','log','Raster_Out']
+                        'Vectors_Out','Vectors_temp','log','Raster_Out','Neighbors']
     prep_folders = ['National_Subregion_gdb','Subregion_gdb','National_gdb','log']
     distribute_folders = ['National_Final_gdb','State_gdb','State','log','State/tif_state_extent']
-    
+    calc_folders = ['Raster_In','Raster_Clip','Polygon_Clip','Neighbor_Mesh']
     run_folder = creation_dir.split('/')[-1]
     base_dir = creation_dir.replace(run_folder,'')
     files = [f for f in os.listdir(base_dir) if f.startswith(run_folder)]
