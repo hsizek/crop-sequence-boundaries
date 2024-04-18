@@ -104,7 +104,7 @@ def BuildFolders(creation_dir, workflow):
                         'Vectors_Out','Vectors_temp','log','Raster_Out','Neighbors']
     prep_folders = ['National_Subregion_gdb','Subregion_gdb','National_gdb','log']
     distribute_folders = ['National_Final_gdb','State_gdb','State','log','State/tif_state_extent']
-    calc_folders = ['Raster_In','Raster_Clip','Polygon_Clip','Neighbor_Mesh']
+    calc_folders = ['Raster_In','Table_Out','Raster_Clip','Polygon_Clip','Neighbor_Mesh']
     run_folder = creation_dir.split('/')[-1]
     base_dir = creation_dir.replace(run_folder,'')
     files = [f for f in os.listdir(base_dir) if f.startswith(run_folder)]
@@ -150,8 +150,6 @@ def BuildFolders(creation_dir, workflow):
                     os.mkdir(f'{run_dir}/{f}')
                 except:
                     pass
-                    
-                
 
     elif workflow == 'distribute':
         try:
@@ -165,13 +163,23 @@ def BuildFolders(creation_dir, workflow):
                     os.mkdir(f'{run_dir}/{f}')
                 except:
                     pass  
-    
+    elif workflow == 'calc':
+        try:
+            os.makedirs(run_dir)
+        except:
+            pass
+        
+        if os.path.exists(run_dir):
+            for f in calc_folders:
+                try:
+                    os.mkdir(f'{run_dir}/{f}')
+                except:
+                    pass  
     elif workflow == 'create_partial':
         run_dir = creation_dir
-    
         
     else:
-        print(f'"{workflow}" is not a valid workflow. Choose "create", "prep", or "distribute"')
+        print(f'"{workflow}" is not a valid workflow. Choose "create", "prep", "calc" or "distribute"')
          
     return run_dir
             

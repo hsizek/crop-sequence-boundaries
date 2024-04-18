@@ -24,7 +24,7 @@ while arcpy_loaded is False:
 #global vars
 cfg = utils.GetConfig('default')
 agdists = cfg['prep']['cnty_shp_file']
-national_cdl_folder = cfg['prep']['national_cdl_folder']
+national_ncl_folder = cfg['prep']['national_cnl_folder']
 cellsize = 30 # for polygon to raster line 256
 ncl_start_year = 2014
 
@@ -36,16 +36,22 @@ def chunks(l, n):
 def CSB_calc(create_dir,calc_dir,area,start_year,end_year):
         # file_path,prep_path,area,start_year,end_year):
     t_init = time.perf_counter()
-    gbd_name = f'c{area}_{start_year}-{end_year}_In.gdb'
+    gbd_name = f'{area}_{start_year}-{end_year}_In.gdb'
     layer_name = f'{area}_0_In'
-    feature_Vector_In = f"{create_dir}/Vector_In/{gbd_name}/{layer_name}"
-    combine_All_Name = f''
+    feature_Vector_In = f"{create_dir}/Vectors_In/{gbd_name}/{layer_name}"
+    combine_All_Name = f'{area}_0_{start_year}_{end_year}'
     raster_Combine_All = f'{create_dir}/CombineAll/{area}_0_{start_year}-{end_year}.tif'
+    raster_NCLs = []
+    ncl_names = []
     if end_year>=ncl_start_year:
-        raster_NCLs = [f"{national_cdl_folder}/{y}/{y}_30m_ncl.tif" for y in range(ncl_start_year,end_year)] 
-    else: 
-        raster_NCLs=[]
-    year_lst = [i for i in range(start_year,end_year+1)]
+        for year in range(ncl_start_year,end_year+1):
+            if year<=2020:
+                raster_NCLs.append(f"{national_ncl_folder}/{year}_30m_confidence_layer/{year}_30m_confidence_layer.img")
+                ncl_names.append(f'ncl{year}')
+            else:
+                raster_NCLs.append(f"{national_ncl_folder}/{year}_30m_Confidence_Layer/{year}_30m_confidence_layer.tif")
+                ncl_names.append(f'ncl{year}')
+    # year_lst = [i for i in range(start_year,end_year+1)]
     # shapefile_name = shape_path.split('\\')[-1].split('.')[0] 
 
     #set up logger
@@ -114,7 +120,7 @@ def CSB_calc(create_dir,calc_dir,area,start_year,end_year):
     logger.info(f'{area}: Create NCL Sub-Rasters ')
     t1 = time.perf_counter()
     # Calculate NCL value for each year which we have NCL data
-    zonal_ncls = [arcpy.sa.ZonalStatistics(raster_Vector_In_file, "OBJECTID", ncl, "MEAN")
+    zonal_ncls = [arcpy.sa.ZonalStatistics(raster_Vector_In_file, "Value", ncl, "MEAN")
                      for ncl in raster_NCLs]
     t2 = time.perf_counter()
     logger.info(f'c{area}: NCL Sub-rasters takes {round((t2 - t1) / 60, 2)} minutes')
@@ -123,9 +129,15 @@ def CSB_calc(create_dir,calc_dir,area,start_year,end_year):
     logger.info(f'{area}: Combine and Join rasters')
     t1 = time.perf_counter()
     raster_combined = arcpy.gp.Combine_sa([raster_Vector_In_file,raster_Combine_All]+zonal_ncls)
-    join_table  = arcpy.management.AddJoin(raster_combined, f'{combine_All_Name}.OBJECTID', raster_Combine_All, "OBJECTID")
-    # TODO Save join field. 
+    for zncl,ncl in zip(zonal_ncls,ncl_names):
+        prev_name = str(zncl).split('\\')[-1]
+        arcpy.management.AlterField(raster_combined, prev_name, ncl)
     
+    join_table  = arcpy.management.AddJoin(raster_combined, f'{combine_All_Name}', raster_Combine_All, "Value")
+    
+    # TODO Save join field. 
+    table_out = f'{calc_dir}/Table_Out/{area}_{start_year}-{end_year}.csv'
+    arcpy.conversion.ExportTable(join_table, table_out)
     # Save off lines for neighbors
     raster = arcpy.sa.Raster(raster_Vector_In_file)
     bounding_box = [(raster.extent.XMin,raster.extent.YMin,raster.extent.XMin+30,raster.extent.YMax),
@@ -137,7 +149,7 @@ def CSB_calc(create_dir,calc_dir,area,start_year,end_year):
     polygon_slices = [f'{calc_dir}\Polygon_Clip\{area}_{str(start_year)}-{str(end_year)}.gdb\{area}_{i}_poly' for i in range(0,4)]
     for rs,bb,ps in zip(raster_slices,bounding_box_str,polygon_slices):
         arcpy.Clip_management(raster_Vector_In_file,bb,rs)
-        arcpy.conversion.RasterToPolygon(rs, ps, 'NO_SIPLIFY', 'Value')
+        arcpy.conversion.RasterToPolygon(rs, ps, 'NO_SIMPLIFY', 'Value')
     return 
     
 def CSB_Neighbor(calc_dir,start_year,end_year):
@@ -184,7 +196,7 @@ def CSB_Neighbor(calc_dir,start_year,end_year):
     neigh = f'{calc_dir}/Neighbor_Mesh/Neigh_Mesh_{str(start_year)}-{str(end_year)}.gdb/Neigh_Mesh'
     arcpy.management.Merge(inputs, poly_mesh, '', 'ADD_SOURCE_INFO')
     arcpy.analysis.PolygonNeighbors(in_features=poly_mesh, out_table=neigh,both_sides="NO_BOTH_SIDES")    
-    return 0 
+    return
 
 if __name__ == '__main__':
 
@@ -224,6 +236,8 @@ if __name__ == '__main__':
             j.start()
         for j in i:
             j.join()
+    
+    CSB_Neighbor(calc_dir,start_year,end_year)
 
     time_final = time.perf_counter()
     print(f'Total time to run CSB calc: {round((time_final - time0) / 60, 2)} minutes')
