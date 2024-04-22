@@ -66,7 +66,7 @@ def SetRunParams(config, args):
                 'prep': 'CSB-prep.py',
                 'distribute': 'CSB-distribute.py',
                 'create_partial': 'CSB-create_partial.py',
-                'calc':'CSB-calc.py'}
+                'calc':'CSB-calculate.py'}
     workflow = args[0]
     
     script = f'{os.getcwd()}/CSB-Run/CSB-Run/{scripts[workflow]}'
@@ -104,7 +104,7 @@ def BuildFolders(creation_dir, workflow):
                         'Vectors_Out','Vectors_temp','log','Raster_Out','Neighbors']
     prep_folders = ['National_Subregion_gdb','Subregion_gdb','National_gdb','log']
     distribute_folders = ['National_Final_gdb','State_gdb','State','log','State/tif_state_extent']
-    calc_folders = ['Raster_In','Table_Out','Raster_Clip','Polygon_Clip','Neighbor_Mesh']
+    calc_folders = ['Raster_In','NCL_Zonal','Table_Out','Raster_Clip','Polygon_Clip','Neighbor_Mesh','log']
     run_folder = creation_dir.split('/')[-1]
     base_dir = creation_dir.replace(run_folder,'')
     files = [f for f in os.listdir(base_dir) if f.startswith(run_folder)]
@@ -196,6 +196,9 @@ def GetRunFolder(workflow, start_year, end_year):
     elif workflow == 'distribute':
         create_path =  f'{data_path}/Prep'
         prefix = 'prep'
+    elif workflow=='calc':
+        create_path = f'{data_path}/Creation'
+        prefix = 'create'
     
     files_prefix = f'{prefix}_{str(start_year)[2:]}{str(end_year)[2:]}_'
     files = [f for f in os.listdir(create_path) if f.startswith(files_prefix) \

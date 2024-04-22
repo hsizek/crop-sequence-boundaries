@@ -6,6 +6,7 @@ import argparse
 import logging
 import sys
 from tracemalloc import start
+from time import sleep
 # CSB-Run utility functions
 import utils
 
@@ -24,9 +25,9 @@ while arcpy_loaded is False:
 #global vars
 cfg = utils.GetConfig('default')
 agdists = cfg['prep']['cnty_shp_file']
-national_ncl_folder = cfg['prep']['national_cnl_folder']
+national_ncl_folder = cfg['calc']['national_ncl_folder']
 cellsize = 30 # for polygon to raster line 256
-ncl_start_year = 2014
+ncl_start_year = 2017
 
 def chunks(l, n):
     for i in range(0, len(l), n):
@@ -34,7 +35,7 @@ def chunks(l, n):
 
 
 def CSB_calc(create_dir,calc_dir,area,start_year,end_year):
-        # file_path,prep_path,area,start_year,end_year):
+    # file_path,prep_path,area,start_year,end_year):
     t_init = time.perf_counter()
     gbd_name = f'{area}_{start_year}-{end_year}_In.gdb'
     layer_name = f'{area}_0_In'
@@ -42,15 +43,15 @@ def CSB_calc(create_dir,calc_dir,area,start_year,end_year):
     combine_All_Name = f'{area}_0_{start_year}_{end_year}'
     raster_Combine_All = f'{create_dir}/CombineAll/{area}_0_{start_year}-{end_year}.tif'
     raster_NCLs = []
-    ncl_names = []
+    zonal_ncl_files = []
     if end_year>=ncl_start_year:
         for year in range(ncl_start_year,end_year+1):
             if year<=2020:
                 raster_NCLs.append(f"{national_ncl_folder}/{year}_30m_confidence_layer/{year}_30m_confidence_layer.img")
-                ncl_names.append(f'ncl{year}')
+                zonal_ncl_files.append(f'{calc_dir}/NCL_Zonal/{area}n{str(year)[-2:]}.tif')
             else:
                 raster_NCLs.append(f"{national_ncl_folder}/{year}_30m_Confidence_Layer/{year}_30m_confidence_layer.tif")
-                ncl_names.append(f'ncl{year}')
+                zonal_ncl_files.append(f'{calc_dir}/NCL_Zonal/{area}n{str(year)[-2:]}.tif')
     # year_lst = [i for i in range(start_year,end_year+1)]
     # shapefile_name = shape_path.split('\\')[-1].split('.')[0] 
 
@@ -95,9 +96,15 @@ def CSB_calc(create_dir,calc_dir,area,start_year,end_year):
     logger.info(f'{area}_{start_year}-{end_year}: Create .tif ')
     assignmentType = "CELL_CENTER"
     convert_raster = False
+    c = 0
     while convert_raster == False:
+        c+=1
+        if c>=10:
+            return
         try:
-            raster_Vector_In_file = calc_dir+f'\Raster_In\VIn{area}_{start_year}-{end_year}.tif'
+            raster_Vector_In_file = calc_dir+f'\Raster_In\V{area}.tif'
+            if arcpy.management.GetCount(feature_Vector_In).getOutput(0)=='0':
+                return
             arcpy.conversion.PolygonToRaster(feature_Vector_In, "OBJECTID",
                                              raster_Vector_In_file,
                                              assignmentType, "NONE", cellsize)
@@ -120,22 +127,37 @@ def CSB_calc(create_dir,calc_dir,area,start_year,end_year):
     logger.info(f'{area}: Create NCL Sub-Rasters ')
     t1 = time.perf_counter()
     # Calculate NCL value for each year which we have NCL data
-    zonal_ncls = [arcpy.sa.ZonalStatistics(raster_Vector_In_file, "Value", ncl, "MEAN")
-                     for ncl in raster_NCLs]
+    for ncl,out_file in zip(raster_NCLs,zonal_ncl_files):
+        ncl_summarize = True
+        while ncl_summarize:
+            try:
+                raster = arcpy.sa.ZonalStatistics(raster_Vector_In_file, "Value", ncl, "MEAN")
+                raster.save(out_file)
+                ncl_summarize=False
+            except Exception as e:
+                error_msg = e.args
+                logger.error(error_msg)
+                f = open(error_path,'a')
+                f.write(''.join(str(item) for item in error_msg))
+                f.close()
+                sleep(10) # This is usually due to excessive ram consumption, so we will let other things run first
+            except:
+                error_msg = arcpy.GetMessage(0)
+                logger.error(error_msg)
+                f = open(error_path,'a')
+                f.write(''.join(str(item) for item in error_msg))
+                f.close()
+                sleep(10)
+    
     t2 = time.perf_counter()
     logger.info(f'c{area}: NCL Sub-rasters takes {round((t2 - t1) / 60, 2)} minutes')
     
     # Combine with CombineAll
     logger.info(f'{area}: Combine and Join rasters')
     t1 = time.perf_counter()
-    raster_combined = arcpy.gp.Combine_sa([raster_Vector_In_file,raster_Combine_All]+zonal_ncls)
-    for zncl,ncl in zip(zonal_ncls,ncl_names):
-        prev_name = str(zncl).split('\\')[-1]
-        arcpy.management.AlterField(raster_combined, prev_name, ncl)
+    raster_combined = arcpy.gp.Combine_sa([raster_Vector_In_file,raster_Combine_All]+zonal_ncl_files)
     
-    join_table  = arcpy.management.AddJoin(raster_combined, f'{combine_All_Name}', raster_Combine_All, "Value")
-    
-    # TODO Save join field. 
+    join_table  = arcpy.management.AddJoin(raster_combined, f'{combine_All_Name[0:10]}', raster_Combine_All, "Value")
     table_out = f'{calc_dir}/Table_Out/{area}_{start_year}-{end_year}.csv'
     arcpy.conversion.ExportTable(join_table, table_out)
     # Save off lines for neighbors
@@ -148,8 +170,75 @@ def CSB_calc(create_dir,calc_dir,area,start_year,end_year):
     raster_slices = [f'{calc_dir}\Raster_Clip\{area}_{i}.tif' for i in range(0,4)]
     polygon_slices = [f'{calc_dir}\Polygon_Clip\{area}_{str(start_year)}-{str(end_year)}.gdb\{area}_{i}_poly' for i in range(0,4)]
     for rs,bb,ps in zip(raster_slices,bounding_box_str,polygon_slices):
-        arcpy.Clip_management(raster_Vector_In_file,bb,rs)
+        arcpy.management.Clip(raster_Vector_In_file,bb,rs,'','0')
         arcpy.conversion.RasterToPolygon(rs, ps, 'NO_SIMPLIFY', 'Value')
+        
+        # add Field 
+        columnList = [i.name for i in arcpy.ListFields(ps)]
+        while 'AREANAME' not in columnList:
+            try:
+                arcpy.AddField_management(in_table=ps, field_name="AREANAME", field_type="TEXT", field_precision="",
+                                          field_scale="", field_length="", field_alias="", field_is_nullable="NON_NULLABLE",
+                                          field_is_required="NON_REQUIRED", field_domain="")
+                columnList = [i.name for i in arcpy.ListFields(ps)]
+                
+            except Exception as e:
+                error_msg = e.args
+                logger.error(error_msg)
+                f = open(error_path, 'a')
+                f.write(''.join(str(item) for item in error_msg))
+                f.close()
+                time.sleep(2)
+                print(f'{area}: try again add field')
+                logger.info(f'{area}: try again add field')
+                arcpy.AddField_management(in_table=ps, field_name="AREANAME", field_type="TEXT", field_precision="",
+                                          field_scale="", field_length="", field_alias="", field_is_nullable="NON_NULLABLE",
+                                          field_is_required="NON_REQUIRED", field_domain="")
+                columnList = [i.name for i in arcpy.ListFields(ps)]
+
+            except:
+                error_msg = arcpy.GetMessage(0)
+                logger.error(error_msg)
+                f = open(error_path, 'a')
+                f.write(''.join(str(item) for item in error_msg))
+                f.close()
+                time.sleep(2)
+                print(f'{area}: try again add field')
+                logger.info(f'{area} try again add field')
+                arcpy.AddField_management(in_table=ps, field_name="AREANAME", field_type="TEXT", field_precision="",
+                                          field_scale="", field_length="", field_alias="", field_is_nullable="NON_NULLABLE",
+                                          field_is_required="NON_REQUIRED", field_domain="")
+                columnList = [i.name for i in arcpy.ListFields(ps)]
+        # set field 
+        try:
+            arcpy.CalculateField_management(in_table=ps,
+                                            field="AREANAME",
+                                            expression=f'{area}')
+        except Exception as e:
+            error_msg = e.args
+            logger.error(error_msg)
+            f = open(error_path, 'a')
+            f.write(''.join(str(item) for item in error_msg))
+            f.write(r'/n')
+            f.close()
+            sys.exit(0)
+        except:
+            error_msg = arcpy.GetMessage(0)
+            logger.error(error_msg)
+            f = open(error_path, 'a')
+            f.write(''.join(str(item) for item in error_msg))
+            f.write(r'/n')
+            f.close()
+            sys.exit(0)
+
+
+
+    # Delete out raster files
+    for r in [raster_Vector_In_file]+zonal_ncl_files:
+        try:
+            os.remove(r)
+        except:
+            pass
     return 
     
 def CSB_Neighbor(calc_dir,start_year,end_year):
@@ -191,11 +280,15 @@ def CSB_Neighbor(calc_dir,start_year,end_year):
     # Grab all of the polygon files
     gdb_folders = [i.parts[-1] for i in Path(f'{calc_dir}/Polygon_Clip').rglob(f'*.gdb')]
     areas = [i.split('_')[0] for i in gdb_folders]
-    inputs = [f'{calc_dir}/Polygon_Clip/{area}_{str(start_year)}-{str(end_year)}.gdb\{area}_{i}_poly' for area in areas for i in range(0,4)]
+    raw_inputs = [f'{calc_dir}/Polygon_Clip/{area}_{str(start_year)}-{str(end_year)}.gdb\{area}_{i}_poly' for area in areas for i in range(0,4)]
+    inputs = []
+    for i in raw_inputs:
+        if arcpy.Exists(i):
+            inputs.append(i)
     poly_mesh = f'{calc_dir}/Neighbor_Mesh/Neigh_Mesh_{str(start_year)}-{str(end_year)}.gdb/Poly_Mesh'
     neigh = f'{calc_dir}/Neighbor_Mesh/Neigh_Mesh_{str(start_year)}-{str(end_year)}.gdb/Neigh_Mesh'
-    arcpy.management.Merge(inputs, poly_mesh, '', 'ADD_SOURCE_INFO')
-    arcpy.analysis.PolygonNeighbors(in_features=poly_mesh, out_table=neigh,both_sides="NO_BOTH_SIDES")    
+    arcpy.management.Merge(inputs, poly_mesh,"#",'ADD_SOURCE_INFO')
+    arcpy.analysis.PolygonNeighbors(in_features=poly_mesh, out_table=neigh,in_fields='gridcode;AREANAME',both_sides="NO_BOTH_SIDES")    
     return
 
 if __name__ == '__main__':
@@ -203,8 +296,8 @@ if __name__ == '__main__':
     time0 = time.perf_counter()
     print('Starting CSB calc code... ')
     
-    start_year = sys.argv[1]
-    end_year = sys.argv[2]
+    start_year = int(sys.argv[1])
+    end_year = int(sys.argv[2])
     # Modify from prep directory to calc directory 
     calc_dir = sys.argv[3] # create_1421_20220511_1
     print(f'Directory: {calc_dir}')
@@ -219,6 +312,7 @@ if __name__ == '__main__':
     csb_filePath = f'{create_dir}/Vectors_IN'
     gdb_folders = [i.parts[-1] for i in Path(csb_filePath).rglob(f'*.gdb')]
     areas = [i.split('_')[0] for i in gdb_folders]
+    areas = ''
     processes = []
     
     for area in areas:
@@ -237,7 +331,7 @@ if __name__ == '__main__':
         for j in i:
             j.join()
     
-    CSB_Neighbor(calc_dir,start_year,end_year)
+    # CSB_Neighbor(calc_dir,start_year,end_year)
 
     time_final = time.perf_counter()
     print(f'Total time to run CSB calc: {round((time_final - time0) / 60, 2)} minutes')
